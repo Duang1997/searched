@@ -77,7 +77,6 @@ for i in range(st.session_state.leader_count):
             leaders.append({"name": lname.strip(), "status": lstatus.strip()})
 st.button("➕ เพิ่มผู้นำตรวจค้น", on_click=add_leader)
 
-# ประมวลผลข้อความผู้นำตรวจค้น (เฉพาะชื่อและสถานะ)
 leader_texts = [f"{l['name']} เกี่ยวข้องเป็น {l['status']}" for l in leaders]
 leaders_intro_text = " และ ".join(leader_texts) if leader_texts else ""
 st.divider()
@@ -108,7 +107,6 @@ for i in range(st.session_state.unit_count):
 
         up_file = st.file_uploader(f"อัปโหลดไฟล์ Excel (.xlsx) หน่วยที่ {i+1} (ไม่บังคับ)", type=["xlsx"], key=f"up_{i}")
         
-        # ตรวจสอบว่ามีการอัปโหลดไฟล์ใหม่หรือไม่
         if up_file is not None:
             if st.session_state[file_key] != up_file.file_id:
                 df = pd.read_excel(up_file, dtype=str)
@@ -124,7 +122,6 @@ for i in range(st.session_state.unit_count):
                     st.error("⚠️ ไม่พบคอลัมน์ 'ชื่อ-นามสกุล' ในไฟล์")
                     st.session_state[file_key] = up_file.file_id
 
-        # แสดงตารางให้ผู้ใช้กรอก/แก้ไขข้อมูล
         edited_officers = st.data_editor(st.session_state[df_key], num_rows="dynamic", use_container_width=True, key=f"edit_{i}")
         st.session_state[df_key] = edited_officers
         
@@ -164,7 +161,7 @@ st.divider()
 # ส่วนที่ 4: พฤติการณ์และผลการตรวจค้น
 # ==========================================
 st.header("ส่วนที่ 4: พฤติการณ์และผลการตรวจค้น")
-search_circumstances = st.text_area("พฤติการณ์ในการตรวจค้น/ตรวจยึด", height=150)
+search_circumstances = st.text_area("ผลการตรวจค้น (ระบุสิ่งที่พบ)", height=150)
 seized_count = st.number_input("จำนวนรายการสิ่งของตรวจยึด (รายการ)", min_value=0, value=1)
 
 handover_opt = st.radio("นำทรัพย์ทั้งหมดส่งมอบให้ใคร", ["พนักงานสอบสวนผู้รับผิดชอบ", "อื่นๆ (ระบุ)"])
@@ -172,6 +169,11 @@ if handover_opt == "อื่นๆ (ระบุ)":
     investigator_name = st.text_input("ระบุชื่อ/ตำแหน่งผู้รับมอบ", placeholder="เช่น ร.ต.อ. ...")
 else:
     investigator_name = "พนักงานสอบสวนผู้รับผิดชอบ"
+
+st.subheader("👁️ ตัวอย่างข้อความที่จะปรากฏในเอกสาร")
+preview_text = f"พฤติการณ์ในการตรวจค้น/ตรวจยึด ตามวันเวลาที่แจ้ง เจ้าพนักงานตำรวจชุดตรวจค้น ได้นำ {warrant_text} เข้าทำการตรวจค้น {search_location} เมื่อไปถึงสถานที่ดังกล่าวพบ {leaders_intro_text} แสดงตัวเป็นผู้ดูแลสถานที่นำตรวจค้นจึงได้แสดงตัวเป็นเจ้าหน้าที่ตำรวจและแจ้งเหตุที่มา อ่านหมายค้น ให้ฟังและให้อ่านเองจนเข้าใจดีแล้ว จึงลงมือตรวจค้น ซึ่งก่อนการตรวจค้นเจ้าพนักงานตำรวจได้แสดงความบริสุทธิ์ให้ {leaders_intro_text} ดูจนเป็นที่พอใจแล้วจึงลงมือตรวจค้น ผลการตรวจค้นพบ {search_circumstances}"
+st.info(preview_text)
+
 st.divider()
 
 # ==========================================
@@ -230,6 +232,7 @@ if st.button("💾 สร้างและดาวน์โหลด บัน
             "leaders_intro_text": leaders_intro_text,
             "units": units_data,
             "search_circumstances": search_circumstances,
+            "full_circumstances_text": preview_text,
             "seized_count": seized_count,
             "investigator_name": investigator_name,
             "img_signer": img_signer,
