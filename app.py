@@ -5,12 +5,13 @@ from docx.shared import Mm
 from io import BytesIO
 import datetime
 
-# --- ตั้งค่าหน้าเพจ (ยกเลิก layout="wide" เพื่อให้เป็นแนวตรงตามความต้องการ) ---
+# --- ตั้งค่าหน้าเพจ (รูปแบบแนวตรง ปกติ ไม่ขยายออกข้าง) ---
 st.set_page_config(page_title="ระบบบันทึกการตรวจค้น/ตรวจยึด (CIB)") 
 
+# --- ตกแต่ง UI ธีม CIB ---
 st.markdown("""
 <style>
-    .cib-header { background-color: #00204a; padding: 15px; border-radius: 5px; color: #f9bc0f; text-align: center; font-family: sans-serif; margin-bottom: 20px; }
+    .cib-header { background-color: #00204a; padding: 15px; border-radius: 5px; color: #f9bc0f; text-align: center; font-family: sans-serif; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
     .cib-header h1 { color: #f9bc0f; margin: 0; font-size: 28px; font-weight: bold; }
     .cib-header p { color: #ffffff; margin: 0; font-size: 16px; }
 </style>
@@ -61,8 +62,8 @@ st.divider()
 # ส่วนที่ 2: อำนาจในการตรวจค้นและผู้นำตรวจค้น
 # ==========================================
 st.header("ส่วนที่ 2: อำนาจในการตรวจค้นและผู้นำตรวจค้น")
-warrant_court = st.text_input("ศาลที่ออกหมายค้น")
-warrant_no = st.text_input("หมายค้นที่")
+warrant_court = st.text_input("ศาลที่ออกหมายค้น", placeholder="เช่น ศาลจังหวัดอุบลราชธานี")
+warrant_no = st.text_input("หมายค้นที่", placeholder="เช่น 47/2568")
 warrant_date = st.date_input("ลงวันที่ (หมายค้น)", key="warrant_date")
 
 st.subheader("ผู้นำตรวจค้น")
@@ -82,71 +83,68 @@ st.divider()
 # ==========================================
 st.header("ส่วนที่ 3: ข้อมูลเจ้าพนักงานตำรวจ")
 default_cmd = "พล.ต.ต.ณัฐศักดิ์ เชาวนาศัย ผบช.ก., พ.ต.ต.พัฒนศักดิ์ บุบผาสุวรรณ ผบก.ป., พ.ต.อ.สุเทพ โตอิ้ม รอง ผบก.ป., พ.ต.อ.สุริยศักดิ์ จิราวัสน์ ผกก.3 บก.ป., พ.ต.ท.พงษ์พิทักษ์ เหล็กชูชาติ, พ.ต.ท.รัฐมนตรี พันชูกลาง, พ.ต.ท.ณัฐดนัย สีแข่ไตร, พ.ต.ท.ศิษฏ์ พูลวงศ์, พ.ต.ท.พัฒษพงศ์ เสณีแสนเสนา รอง ผกก.3 บก.ป."
-commanders = st.text_area("ภายใต้อำนวยการสั่งการของ", value=default_cmd, height=100)
+default_officer_row = {"ยศ": "พ.ต.ต.", "ชื่อ-นามสกุล": "สุวิจักขณ์ รัตนพันธ์", "ตำแหน่ง": "สว.กก.๓ บก.ป."}
 
-units_data_text = []
-officers_data = []
-officer_displays = []
+units_data = []
+all_officer_displays = []
 
-st.subheader("หน่วยและเจ้าหน้าที่ที่ร่วมตรวจค้น")
 for i in range(st.session_state.unit_count):
     with st.container(border=True):
-        st.markdown(f"**หน่วยตรวจค้นที่ {i+1}**")
-        unit_name = st.text_input(f"ชื่อหน่วยงานที่ {i+1}", placeholder="เช่น กก.3 บก.ป.", key=f"u_name_{i}")
+        st.subheader(f"🏢 หน่วยตรวจค้นที่ {i+1}")
+        unit_name = st.text_input(f"ชื่อหน่วยงาน", value="กก.๓ บก.ป." if i==0 else "", placeholder="เช่น กก.๓ บก.ป.", key=f"u_name_{i}")
+        commanders_text = st.text_area(f"ภายใต้อำนวยการสั่งการของ", value=default_cmd if i==0 else "", key=f"cmd_{i}")
         
         df_key = f"officer_df_{i}"
         if df_key not in st.session_state:
-            st.session_state[df_key] = pd.DataFrame([{"ยศ": "พ.ต.ต.", "ชื่อ-นามสกุล": "", "ตำแหน่ง": "สว.กก.๓ บก.ป."}])
+            st.session_state[df_key] = pd.DataFrame([default_officer_row]) if i==0 else pd.DataFrame([{"ยศ": "พ.ต.ต.", "ชื่อ-นามสกุล": "", "ตำแหน่ง": ""}])
             
-        off_mode = st.radio(f"รูปแบบการเพิ่มรายชื่อ (หน่วยที่ {i+1})", ["กรอกผ่านตารางในเว็บ", "อัปโหลดไฟล์ Excel"], horizontal=True, key=f"mode_{i}")
+        off_mode = st.radio(f"รูปแบบการเพิ่มรายชื่อเจ้าหน้าที่ (หน่วยที่ {i+1})", ["กรอกผ่านตารางในเว็บ", "อัปโหลดไฟล์ Excel"], horizontal=True, key=f"mode_{i}")
         
-        if off_mode == "อัปโหลดไฟล์ Excel":
-            up_file = st.file_uploader(f"อัปโหลดไฟล์ Excel (.xlsx) หน่วยที่ {i+1}", type=["xlsx"], key=f"up_{i}")
-            if up_file is not None:
-                if f"uploaded_{i}" not in st.session_state or st.session_state[f"uploaded_{i}"] != up_file.name:
-                    df = pd.read_excel(up_file, dtype=str)
-                    df.columns = df.columns.str.strip()
-                    if "ชื่อ-นามสกุล" in df.columns:
-                        st.session_state[df_key] = df
-                        st.session_state[f"uploaded_{i}"] = up_file.name
-                    else:
-                        st.error("⚠️ ไม่พบคอลัมน์ 'ชื่อ-นามสกุล' ในไฟล์")
-
-        # แสดงตารางเพื่อให้แก้ไขได้เสมอ ไม่ว่าจะมาจากการกรอกหรือ Excel
-        edited_officers = st.data_editor(st.session_state[df_key], num_rows="dynamic", use_container_width=True, key=f"edit_{i}")
-        
-        unit_officers = []
-        if "ชื่อ-นามสกุล" in edited_officers.columns:
+        if off_mode == "กรอกผ่านตารางในเว็บ":
+            edited_officers = st.data_editor(st.session_state[df_key], num_rows="dynamic", use_container_width=True, key=f"edit_{i}")
             valid_officers = edited_officers[edited_officers["ชื่อ-นามสกุล"].astype(str).str.strip() != ""]
-            valid_officers = valid_officers[valid_officers["ชื่อ-นามสกุล"].astype(str).str.lower() != "nan"]
+        else:
+            st.info("💡 รูปแบบหัวตาราง Excel ที่ต้องการ: `ยศ` | `ชื่อ-นามสกุล` | `ตำแหน่ง`")
+            up_file = st.file_uploader(f"อัปโหลดไฟล์ Excel (.xlsx) หน่วยที่ {i+1}", type=["xlsx"], key=f"up_{i}")
+            if up_file:
+                df = pd.read_excel(up_file, dtype=str)
+                df.columns = df.columns.str.strip()
+                if "ชื่อ-นามสกุล" in df.columns:
+                    valid_officers = df[df["ชื่อ-นามสกุล"].notna() & (df["ชื่อ-นามสกุล"].astype(str).str.strip() != "")]
+                else:
+                    valid_officers = pd.DataFrame(columns=["ยศ", "ชื่อ-นามสกุล", "ตำแหน่ง"])
+                    st.error("⚠️ ไม่พบคอลัมน์ 'ชื่อ-นามสกุล' ในไฟล์")
+            else:
+                valid_officers = pd.DataFrame(columns=["ยศ", "ชื่อ-นามสกุล", "ตำแหน่ง"])
+
+        officers_list = []
+        for _, r in valid_officers.iterrows():
+            rank = str(r.get('ยศ', '')).replace("nan", "").strip()
+            name = str(r.get('ชื่อ-นามสกุล', '')).replace("nan", "").strip()
+            pos = str(r.get('ตำแหน่ง', '')).replace("nan", "").strip()
             
-            for _, r in valid_officers.iterrows():
-                rank = str(r.get('ยศ', '')).replace("nan", "").strip()
-                name = str(r.get('ชื่อ-นามสกุล', '')).replace("nan", "").strip()
-                pos = str(r.get('ตำแหน่ง', '')).replace("nan", "").strip()
+            if name:
                 display = f"{rank}{name} {pos}".strip()
-                
-                if name:
-                    officer_obj = {"rank": rank, "name_only": name, "display": display}
-                    unit_officers.append(officer_obj)
-                    officers_data.append(officer_obj)
-                    officer_displays.append(display)
-                    
-        if unit_name and unit_officers:
-            units_data_text.append(f"เจ้าพนักงานตำรวจ ({unit_name}) ประกอบด้วย " + ", ".join([o['display'] for o in unit_officers]))
+                officers_list.append({"rank": rank, "name_only": name, "display": display})
+                all_officer_displays.append(display)
+
+        signature_rows = []
+        for j in range(0, len(officers_list), 2):
+            o1 = officers_list[j]
+            o2 = officers_list[j+1] if j+1 < len(officers_list) else {"rank": "", "name_only": ""}
+            signature_rows.append({
+                "officer1_rank": o1["rank"], "officer1_name": o1["name_only"], 
+                "officer2_rank": o2["rank"], "officer2_name": o2["name_only"]
+            })
+
+        units_data.append({
+            "unit_name": unit_name,
+            "commanders_text": commanders_text,
+            "police_team_text": f"เจ้าพนักงานตำรวจ ({unit_name}) ประกอบด้วย " + ", ".join([o["display"] for o in officers_list]) if officers_list else "",
+            "signature_rows": signature_rows
+        })
 
 st.button("➕ เพิ่มหน่วยตรวจค้นอื่น", on_click=add_unit)
-police_team_text = " และ ".join(units_data_text) if units_data_text else ", ".join(officer_displays)
-
-signature_rows = []
-for j in range(0, len(officers_data), 2):
-    o1 = officers_data[j]
-    o2 = officers_data[j+1] if j+1 < len(officers_data) else {"rank": "", "name_only": ""}
-    signature_rows.append({
-        "officer1_rank": o1["rank"], "officer1_name": o1["name_only"], 
-        "officer2_rank": o2["rank"], "officer2_name": o2["name_only"]
-    })
-
 st.divider()
 
 # ==========================================
@@ -158,7 +156,7 @@ seized_count = st.number_input("จำนวนรายการสิ่งข
 
 handover_opt = st.radio("นำทรัพย์ทั้งหมดส่งมอบให้ใคร", ["พนักงานสอบสวนผู้รับผิดชอบ", "อื่นๆ (ระบุ)"])
 if handover_opt == "อื่นๆ (ระบุ)":
-    investigator_name = st.text_input("ระบุชื่อ/ตำแหน่งผู้รับมอบ")
+    investigator_name = st.text_input("ระบุชื่อ/ตำแหน่งผู้รับมอบ", placeholder="เช่น ร.ต.อ. ...")
 else:
     investigator_name = "พนักงานสอบสวนผู้รับผิดชอบ"
 
@@ -168,16 +166,17 @@ st.divider()
 # ส่วนที่ 5: ภาพประกอบการตรวจค้น
 # ==========================================
 st.header("ส่วนที่ 5: ภาพประกอบการตรวจค้น")
+st.caption("อัปโหลดภาพถ่ายการปฏิบัติงานเพื่อแนบท้ายบันทึก")
 img_1 = st.file_uploader("ภาพประกอบที่ 1", type=['png', 'jpg', 'jpeg'])
 img_2 = st.file_uploader("ภาพประกอบที่ 2", type=['png', 'jpg', 'jpeg'])
 
-st.subheader("เลือกหัวหน้าชุดตรวจค้น")
-leader_names = [l["name"] for l in leaders]
-sign_choices = leader_names + officer_displays + ["อื่นๆ (ระบุ)"]
+st.subheader("ผู้ลงนามรับรองภาพถ่าย")
+leader_names = [l["name"] for l in leaders] if 'leaders' in locals() else []
+sign_choices = leader_names + all_officer_displays + ["อื่นๆ (ระบุ)"]
 
-img_sign_opt = st.selectbox("เลือกหัวหน้าชุดตรวจค้น", sign_choices)
+img_sign_opt = st.selectbox("เลือกผู้ลงนามภาพถ่าย", sign_choices)
 if img_sign_opt == "อื่นๆ (ระบุ)":
-    img_signer = st.text_input("เลือกหัวหน้าชุดตรวจค้น")
+    img_signer = st.text_input("ระบุชื่อผู้ลงนามภาพถ่าย")
 else:
     img_signer = img_sign_opt
 
@@ -192,7 +191,7 @@ if st.button("💾 สร้างและดาวน์โหลด บัน
         
         context = {
             "record_location": record_location,
-            "record_date_th": format_thai_date(record_date), 
+            "record_date_th": format_thai_date(record_date),
             "record_date_ad": format_ad_date(record_date),
             "record_time": record_time,
             "search_location": search_location,
@@ -205,9 +204,7 @@ if st.button("💾 สร้างและดาวน์โหลด บัน
             "warrant_date_th": format_thai_date(warrant_date),
             "warrant_date_ad": format_ad_date(warrant_date),
             "leaders": leaders,
-            "commanders": commanders,
-            "police_team_text": police_team_text,
-            "signature_rows": signature_rows,
+            "units": units_data,
             "search_circumstances": search_circumstances,
             "seized_count": seized_count,
             "investigator_name": investigator_name,
@@ -230,4 +227,4 @@ if st.button("💾 สร้างและดาวน์โหลด บัน
             use_container_width=True
         )
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาด: {e}")
+        st.error(f"เกิดข้อผิดพลาด: {e}\n(กรุณาตรวจสอบว่ามีไฟล์ template_search_seizure.docx อยู่ในระบบและตั้งชื่อตัวแปรตรงกับโค้ด)")
