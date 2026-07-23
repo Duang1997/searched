@@ -150,7 +150,7 @@ for i in range(st.session_state.unit_count):
         units_data.append({
             "unit_name": unit_name,
             "commanders_text": commanders_text,
-            "police_team_text": f"เจ้าพนักงานตำรวจ ({unit_name}) ประกอบด้วย " + ", ".join([o["display"] for o in officers_list]) if officers_list else "",
+            "police_team_text": f"เจ้าพนักงานตำรวจ {unit_name} ประกอบด้วย " + ", ".join([o["display"] for o in officers_list]) if officers_list else "",
             "signature_rows": signature_rows
         })
 
