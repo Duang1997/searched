@@ -4,11 +4,11 @@ from docxtpl import DocxTemplate, InlineImage
 from docx.shared import Mm
 from io import BytesIO
 import datetime
+import os
 
-# --- ตั้งค่าหน้าเพจ (รูปแบบแนวตรง ปกติ ไม่ขยายออกข้าง) ---
+# --- ตั้งค่าหน้าเพจ ---
 st.set_page_config(page_title="ระบบบันทึกการตรวจค้น/ตรวจยึด (CIB)") 
 
-# --- ตกแต่ง UI ธีม CIB ---
 st.markdown("""
 <style>
     .cib-header { background-color: #00204a; padding: 15px; border-radius: 5px; color: #f9bc0f; text-align: center; font-family: sans-serif; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
@@ -21,13 +21,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# --- ฟังก์ชันจัดการวันที่ ---
-THAI_MONTHS = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
-
-def format_thai_date(date_obj):
-    if not date_obj: return ""
-    return f"วันที่ {date_obj.day} {THAI_MONTHS[date_obj.month]} {date_obj.year + 543}"
-
+# --- ฟังก์ชันจัดการวันที่ (รูปแบบ ค.ศ. dd/mm/yyyy ตามมาตรฐาน) ---
 def format_ad_date(date_obj):
     if not date_obj: return ""
     return date_obj.strftime("%d/%m/%Y")
@@ -55,7 +49,6 @@ search_location = st.text_input("สถานที่ตรวจค้น", pl
 search_date = st.date_input("วันที่ตรวจค้น/ตรวจยึด", key="search_date")
 search_time = st.text_input("เวลาที่ตรวจค้น/ตรวจยึด", placeholder="เช่น 06.00")
 search_end_time = st.text_input("เวลาที่เสร็จสิ้นการตรวจค้น", placeholder="เช่น 08.00")
-
 st.divider()
 
 # ==========================================
@@ -71,10 +64,14 @@ leaders = []
 for i in range(st.session_state.leader_count):
     with st.container(border=True):
         lname = st.text_input(f"ชื่อ-นามสกุล ผู้นำตรวจค้นคนที่ {i+1}", key=f"l_name_{i}")
-        lstatus = st.text_input(f"สถานะ ผู้นำตรวจค้นคนที่ {i+1}", placeholder="เช่น ผู้ดูแลสถานที่, เจ้าบ้าน", key=f"l_status_{i}")
+        lstatus = st.text_input(f"เกี่ยวข้องเป็น (สถานะ) คนที่ {i+1}", placeholder="เช่น ผู้ดูแลสถานที่, เจ้าบ้าน", key=f"l_status_{i}")
         if lname.strip():
             leaders.append({"name": lname.strip(), "status": lstatus.strip()})
 st.button("➕ เพิ่มผู้นำตรวจค้น", on_click=add_leader)
+
+# สร้างข้อความผู้นำตรวจค้นอัตโนมัติ
+leader_texts = [f"{l['name']} เกี่ยวข้องเป็น {l['status']}" for l in leaders]
+leaders_intro_text = f"เมื่อไปถึงสถานที่ดังกล่าวพบ {' และ '.join(leader_texts)} แสดงตัวเป็นผู้นำตรวจค้น" if leader_texts else ""
 
 st.divider()
 
@@ -111,6 +108,7 @@ for i in range(st.session_state.unit_count):
                 df.columns = df.columns.str.strip()
                 if "ชื่อ-นามสกุล" in df.columns:
                     valid_officers = df[df["ชื่อ-นามสกุล"].notna() & (df["ชื่อ-นามสกุล"].astype(str).str.strip() != "")]
+                    st.success(f"✅ โหลดข้อมูลเจ้าหน้าที่จำนวน {len(valid_officers)} นายสำเร็จ (ซ่อนตารางแสดงผล)")
                 else:
                     valid_officers = pd.DataFrame(columns=["ยศ", "ชื่อ-นามสกุล", "ตำแหน่ง"])
                     st.error("⚠️ ไม่พบคอลัมน์ 'ชื่อ-นามสกุล' ในไฟล์")
@@ -159,7 +157,6 @@ if handover_opt == "อื่นๆ (ระบุ)":
     investigator_name = st.text_input("ระบุชื่อ/ตำแหน่งผู้รับมอบ", placeholder="เช่น ร.ต.อ. ...")
 else:
     investigator_name = "พนักงานสอบสวนผู้รับผิดชอบ"
-
 st.divider()
 
 # ==========================================
@@ -179,31 +176,47 @@ if img_sign_opt == "อื่นๆ (ระบุ)":
     img_signer = st.text_input("ระบุชื่อผู้ลงนามภาพถ่าย")
 else:
     img_signer = img_sign_opt
-
 st.divider()
 
 # ==========================================
 # การประมวลผลและสร้างเอกสาร
 # ==========================================
-if st.button("💾 สร้างและดาวน์โหลด บันทึกการตรวจค้น/ตรวจยึด", type="primary", use_container_width=True):
+st.header("ส่วนที่ 6: ดาวน์โหลดเอกสารและไฟล์แนบ")
+
+# ไฟล์แนบ Excel และ PPTX
+col_ex, col_pp = st.columns(2)
+with col_ex:
+    if os.path.exists("บัญชีของกลาง.xlsx"):
+        with open("บัญชีของกลาง.xlsx", "rb") as f:
+            st.download_button("📊 โหลดแม่แบบ บัญชีตรวจยึด (Excel)", f, file_name="บัญชีของกลาง.xlsx", use_container_width=True)
+    else:
+        st.button("📊 โหลดแม่แบบ บัญชีตรวจยึด (ไม่พบไฟล์)", disabled=True, use_container_width=True)
+
+with col_pp:
+    if os.path.exists("ป้ายของกลาง.pptx"):
+        with open("ป้ายของกลาง.pptx", "rb") as f:
+            st.download_button("🖼️ โหลดแม่แบบ ป้ายของกลาง (PPTX)", f, file_name="ป้ายของกลาง.pptx", use_container_width=True)
+    else:
+        st.button("🖼️ โหลดแม่แบบ ป้ายของกลาง (ไม่พบไฟล์)", disabled=True, use_container_width=True)
+
+# สร้างบันทึกตรวจค้น
+if st.button("💾 สร้างและดาวน์โหลด บันทึกการตรวจค้น/ตรวจยึด (Word)", type="primary", use_container_width=True):
     try:
         doc = DocxTemplate("template_search_seizure.docx")
         
         context = {
             "record_location": record_location,
-            "record_date_th": format_thai_date(record_date),
             "record_date_ad": format_ad_date(record_date),
             "record_time": record_time,
             "search_location": search_location,
-            "search_date_th": format_thai_date(search_date),
             "search_date_ad": format_ad_date(search_date),
             "search_time": search_time,
             "search_end_time": search_end_time,
             "warrant_court": warrant_court,
             "warrant_no": warrant_no,
-            "warrant_date_th": format_thai_date(warrant_date),
             "warrant_date_ad": format_ad_date(warrant_date),
             "leaders": leaders,
+            "leaders_intro_text": leaders_intro_text,
             "units": units_data,
             "search_circumstances": search_circumstances,
             "seized_count": seized_count,
@@ -227,4 +240,4 @@ if st.button("💾 สร้างและดาวน์โหลด บัน
             use_container_width=True
         )
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาด: {e}\n(กรุณาตรวจสอบว่ามีไฟล์ template_search_seizure.docx อยู่ในระบบและตั้งชื่อตัวแปรตรงกับโค้ด)")
+        st.error(f"เกิดข้อผิดพลาด: {e}")
