@@ -21,10 +21,16 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# --- ฟังก์ชันจัดการวันที่ (รูปแบบ ค.ศ. dd/mm/yyyy ตามมาตรฐาน) ---
-def format_ad_date(date_obj):
+# --- ฟังก์ชันจัดการวันที่ (พ.ศ.) ---
+THAI_MONTHS = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"]
+
+def format_thai_date(date_obj):
     if not date_obj: return ""
-    return date_obj.strftime("%d/%m/%Y")
+    return f"วันที่ {date_obj.day} {THAI_MONTHS[date_obj.month]} {date_obj.year + 543}"
+
+def format_thai_date_only(date_obj):
+    if not date_obj: return ""
+    return f"{date_obj.day} {THAI_MONTHS[date_obj.month]} {date_obj.year + 543}"
 
 # --- จัดการ Session State ---
 if 'unit_count' not in st.session_state:
@@ -55,9 +61,11 @@ st.divider()
 # ส่วนที่ 2: อำนาจในการตรวจค้นและผู้นำตรวจค้น
 # ==========================================
 st.header("ส่วนที่ 2: อำนาจในการตรวจค้นและผู้นำตรวจค้น")
-warrant_court = st.text_input("ศาลที่ออกหมายค้น", placeholder="เช่น ศาลจังหวัดอุบลราชธานี")
-warrant_no = st.text_input("หมายค้นที่", placeholder="เช่น 47/2568")
+warrant_court = st.text_input("ศาลที่ออกหมายค้น", placeholder="เช่น ศาลอาญา")
+warrant_no = st.text_input("หมายค้นที่", placeholder="เช่น 3/26")
 warrant_date = st.date_input("ลงวันที่ (หมายค้น)", key="warrant_date")
+
+warrant_text = f"หมายค้นของ {warrant_court} ที่ {warrant_no} ลงวันที่ {format_thai_date_only(warrant_date)}"
 
 st.subheader("ผู้นำตรวจค้น")
 leaders = []
@@ -69,10 +77,9 @@ for i in range(st.session_state.leader_count):
             leaders.append({"name": lname.strip(), "status": lstatus.strip()})
 st.button("➕ เพิ่มผู้นำตรวจค้น", on_click=add_leader)
 
-# สร้างข้อความผู้นำตรวจค้นอัตโนมัติ
+# ประมวลผลข้อความผู้นำตรวจค้น (เฉพาะชื่อและสถานะ)
 leader_texts = [f"{l['name']} เกี่ยวข้องเป็น {l['status']}" for l in leaders]
-leaders_intro_text = f"เมื่อไปถึงสถานที่ดังกล่าวพบ {' และ '.join(leader_texts)} แสดงตัวเป็นผู้นำตรวจค้น" if leader_texts else ""
-
+leaders_intro_text = " และ ".join(leader_texts) if leader_texts else ""
 st.divider()
 
 # ==========================================
@@ -92,28 +99,36 @@ for i in range(st.session_state.unit_count):
         commanders_text = st.text_area(f"ภายใต้อำนวยการสั่งการของ", value=default_cmd if i==0 else "", key=f"cmd_{i}")
         
         df_key = f"officer_df_{i}"
+        file_key = f"uploaded_file_id_{i}"
+        
         if df_key not in st.session_state:
             st.session_state[df_key] = pd.DataFrame([default_officer_row]) if i==0 else pd.DataFrame([{"ยศ": "พ.ต.ต.", "ชื่อ-นามสกุล": "", "ตำแหน่ง": ""}])
-            
-        off_mode = st.radio(f"รูปแบบการเพิ่มรายชื่อเจ้าหน้าที่ (หน่วยที่ {i+1})", ["กรอกผ่านตารางในเว็บ", "อัปโหลดไฟล์ Excel"], horizontal=True, key=f"mode_{i}")
+        if file_key not in st.session_state:
+            st.session_state[file_key] = None
+
+        up_file = st.file_uploader(f"อัปโหลดไฟล์ Excel (.xlsx) หน่วยที่ {i+1} (ไม่บังคับ)", type=["xlsx"], key=f"up_{i}")
         
-        if off_mode == "กรอกผ่านตารางในเว็บ":
-            edited_officers = st.data_editor(st.session_state[df_key], num_rows="dynamic", use_container_width=True, key=f"edit_{i}")
-            valid_officers = edited_officers[edited_officers["ชื่อ-นามสกุล"].astype(str).str.strip() != ""]
-        else:
-            st.info("💡 รูปแบบหัวตาราง Excel ที่ต้องการ: `ยศ` | `ชื่อ-นามสกุล` | `ตำแหน่ง`")
-            up_file = st.file_uploader(f"อัปโหลดไฟล์ Excel (.xlsx) หน่วยที่ {i+1}", type=["xlsx"], key=f"up_{i}")
-            if up_file:
+        # ตรวจสอบว่ามีการอัปโหลดไฟล์ใหม่หรือไม่
+        if up_file is not None:
+            if st.session_state[file_key] != up_file.file_id:
                 df = pd.read_excel(up_file, dtype=str)
                 df.columns = df.columns.str.strip()
                 if "ชื่อ-นามสกุล" in df.columns:
-                    valid_officers = df[df["ชื่อ-นามสกุล"].notna() & (df["ชื่อ-นามสกุล"].astype(str).str.strip() != "")]
-                    st.success(f"✅ โหลดข้อมูลเจ้าหน้าที่จำนวน {len(valid_officers)} นายสำเร็จ (ซ่อนตารางแสดงผล)")
+                    if "ยศ" not in df.columns: df["ยศ"] = ""
+                    if "ตำแหน่ง" not in df.columns: df["ตำแหน่ง"] = ""
+                    df = df[["ยศ", "ชื่อ-นามสกุล", "ตำแหน่ง"]].fillna("")
+                    st.session_state[df_key] = df
+                    st.session_state[file_key] = up_file.file_id
+                    st.success(f"✅ โหลดข้อมูลจาก Excel สำเร็จ สามารถแก้ไขในตารางด้านล่างได้ทันที")
                 else:
-                    valid_officers = pd.DataFrame(columns=["ยศ", "ชื่อ-นามสกุล", "ตำแหน่ง"])
                     st.error("⚠️ ไม่พบคอลัมน์ 'ชื่อ-นามสกุล' ในไฟล์")
-            else:
-                valid_officers = pd.DataFrame(columns=["ยศ", "ชื่อ-นามสกุล", "ตำแหน่ง"])
+                    st.session_state[file_key] = up_file.file_id
+
+        # แสดงตารางให้ผู้ใช้กรอก/แก้ไขข้อมูล
+        edited_officers = st.data_editor(st.session_state[df_key], num_rows="dynamic", use_container_width=True, key=f"edit_{i}")
+        st.session_state[df_key] = edited_officers
+        
+        valid_officers = edited_officers[edited_officers["ชื่อ-นามสกุล"].astype(str).str.strip() != ""]
 
         officers_list = []
         for _, r in valid_officers.iterrows():
@@ -183,7 +198,6 @@ st.divider()
 # ==========================================
 st.header("ส่วนที่ 6: ดาวน์โหลดเอกสารและไฟล์แนบ")
 
-# ไฟล์แนบ Excel และ PPTX
 col_ex, col_pp = st.columns(2)
 with col_ex:
     if os.path.exists("บัญชีของกลาง.xlsx"):
@@ -199,22 +213,19 @@ with col_pp:
     else:
         st.button("🖼️ โหลดแม่แบบ ป้ายของกลาง (ไม่พบไฟล์)", disabled=True, use_container_width=True)
 
-# สร้างบันทึกตรวจค้น
 if st.button("💾 สร้างและดาวน์โหลด บันทึกการตรวจค้น/ตรวจยึด (Word)", type="primary", use_container_width=True):
     try:
         doc = DocxTemplate("template_search_seizure.docx")
         
         context = {
             "record_location": record_location,
-            "record_date_ad": format_ad_date(record_date),
+            "record_date_th": format_thai_date(record_date),
             "record_time": record_time,
             "search_location": search_location,
-            "search_date_ad": format_ad_date(search_date),
+            "search_date_th": format_thai_date(search_date),
             "search_time": search_time,
             "search_end_time": search_end_time,
-            "warrant_court": warrant_court,
-            "warrant_no": warrant_no,
-            "warrant_date_ad": format_ad_date(warrant_date),
+            "warrant_text": warrant_text,
             "leaders": leaders,
             "leaders_intro_text": leaders_intro_text,
             "units": units_data,
